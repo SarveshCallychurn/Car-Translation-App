@@ -1,0 +1,10 @@
+{
+  "name": "car-manual-translator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Japanese to English photo translator for car manuals, on Netlify",
+  "scripts": {
+    "dev": "netlify dev",
+    "deploy": "netlify deploy --prod"
+  }
+}

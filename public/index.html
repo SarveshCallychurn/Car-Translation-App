@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#c8102e">
+<meta name="description" content="Translate Japanese car manuals, labels and dashboard messages to English from a photo.">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
+<title>Car Manual Translator (JA → EN)</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --surface: #ffffff; --text: #1c1c1a; --muted: #6b6a64;
+    --border: #dcdad2; --accent: #c8102e; --accent-text: #ffffff; --warn-bg: #fff4d6; --warn-text: #6a4b00;
+    color-scheme: light;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151514; --surface: #1f1f1d; --text: #efeee8; --muted: #a09f97;
+      --border: #3a3a36; --accent: #ff4d63; --accent-text: #1a0508; --warn-bg: #3a2f10; --warn-text: #f3d98a;
+      color-scheme: dark;
+    }
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", Roboto, sans-serif;
+    line-height: 1.5; -webkit-text-size-adjust: 100%;
+  }
+  main { max-width: 560px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 1.3rem; margin: 0 0 2px; }
+  .sub { color: var(--muted); font-size: .9rem; margin: 0 0 18px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
+  .drop {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+    min-height: 150px; border: 2px dashed var(--border); border-radius: 12px; text-align: center;
+    color: var(--muted); padding: 14px; cursor: pointer;
+  }
+  .drop strong { color: var(--text); }
+  .drop img { max-width: 100%; max-height: 320px; border-radius: 8px; display: block; }
+  .row { display: flex; gap: 10px; margin-top: 12px; }
+  button {
+    font: inherit; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    padding: 12px 14px; min-height: 48px; cursor: pointer; flex: 1;
+  }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  label.field { display: block; font-size: .85rem; color: var(--muted); margin-top: 12px; }
+  input[type="text"] {
+    width: 100%; font: inherit; padding: 11px 12px; margin-top: 4px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  }
+  .result-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .result-head h2 { font-size: 1rem; margin: 0; }
+  .result-head button { flex: none; min-height: 36px; padding: 6px 12px; font-size: .85rem; }
+  #output { white-space: pre-wrap; word-wrap: break-word; font-size: 1rem; }
+  .status { color: var(--muted); font-size: .9rem; }
+  .error { background: var(--warn-bg); color: var(--warn-text); border-radius: 10px; padding: 10px 12px; font-size: .9rem; margin-bottom: 14px; }
+  .hidden { display: none !important; }
+  .foot { color: var(--muted); font-size: .8rem; text-align: center; margin-top: 18px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🚗 Car Manual Translator</h1>
+  <p class="sub">Japanese → English. Take or upload a photo of the page, label or dashboard message.</p>
+
+  <div class="card">
+    <label class="drop" id="drop" for="file">
+      <span id="dropText"><strong>Tap to take a photo or choose one</strong><br>Manual pages, warning lights, labels, stickers</span>
+      <img id="preview" class="hidden" alt="Selected photo">
+    </label>
+    <input id="file" type="file" accept="image/*" class="hidden">
+
+    <label class="field" for="context">Car make / model (optional, improves technical terms)</label>
+    <input id="context" type="text" placeholder="e.g. Toyota Aqua 2016" autocomplete="off" maxlength="80">
+
+    <div class="row">
+      <button id="clear" class="hidden">Clear</button>
+      <button id="go" class="primary" disabled>Translate</button>
+    </div>
+  </div>
+
+  <div id="error" class="error hidden"></div>
+
+  <div id="resultCard" class="card hidden">
+    <div class="result-head">
+      <h2>Translation</h2>
+      <button id="copy">Copy</button>
+    </div>
+    <div id="status" class="status hidden">Reading the photo…</div>
+    <div id="output"></div>
+  </div>
+
+  <div id="historyCard" class="card hidden">
+    <div class="result-head"><h2>Recent (saved on this device only)</h2><button id="clearHistory">Clear</button></div>
+    <div id="history"></div>
+  </div>
+
+  <p class="foot">Photos are sent to an AI service for translation and are not stored by this site. Always double-check safety-critical items (airbags, brakes, fuel, warnings) against an official source or a dealer.</p>
+</main>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const fileInput = $("file"), preview = $("preview"), dropText = $("dropText");
+  const goBtn = $("go"), clearBtn = $("clear"), copyBtn = $("copy");
+  const out = $("output"), statusEl = $("status"), errEl = $("error");
+  const resultCard = $("resultCard");
+  const historyCard = $("historyCard"), historyEl = $("history");
+  let imageBlob = null, ctl = null, history = [];
+
+  // ---- history (best-effort local storage) ----
+  function loadHistory() {
+    try { history = JSON.parse(localStorage.getItem("car-translator-history") || "[]"); } catch (e) { history = []; }
+    if (!Array.isArray(history)) history = [];
+    renderHistory();
+  }
+  function saveHistory() {
+    try { localStorage.setItem("car-translator-history", JSON.stringify(history.slice(0, 15))); } catch (e) {}
+  }
+  function renderHistory() {
+    historyEl.textContent = "";
+    historyCard.classList.toggle("hidden", history.length === 0);
+    history.forEach((h) => {
+      const d = document.createElement("details");
+      d.style.marginBottom = "8px";
+      const s = document.createElement("summary");
+      s.textContent = h.title;
+      s.style.cursor = "pointer";
+      const p = document.createElement("div");
+      p.style.whiteSpace = "pre-wrap";
+      p.style.marginTop = "6px";
+      p.textContent = h.text;
+      d.append(s, p);
+      historyEl.appendChild(d);
+    });
+  }
+  $("clearHistory").onclick = () => { history = []; saveHistory(); renderHistory(); };
+
+  // ---- image handling: downscale to keep uploads small and fast ----
+  function downscale(file, maxSide) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        let w = img.naturalWidth, h = img.naturalHeight;
+        const scale = Math.min(1, maxSide / Math.max(w, h));
+        w = Math.round(w * scale); h = Math.round(h * scale);
+        const c = document.createElement("canvas");
+        c.width = w; c.height = h;
+        c.getContext("2d").drawImage(img, 0, 0, w, h);
+        c.toBlob((b) => { URL.revokeObjectURL(url); b ? resolve(b) : reject(new Error("encode")); }, "image/jpeg", 0.85);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("decode")); };
+      img.src = url;
+    });
+  }
+
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result).split(",")[1]);
+      r.onerror = () => reject(new Error("read"));
+      r.readAsDataURL(blob);
+    });
+  }
+
+  function showError(msg) { errEl.textContent = msg; errEl.classList.remove("hidden"); }
+
+  fileInput.addEventListener("change", async () => {
+    const f = fileInput.files && fileInput.files[0];
+    if (!f) return;
+    errEl.classList.add("hidden");
+    try {
+      imageBlob = await downscale(f, 1800);
+    } catch (e) {
+      showError("That photo couldn't be read. Please try a JPG or PNG image.");
+      return;
+    }
+    if (preview.src) { try { URL.revokeObjectURL(preview.src); } catch (e) {} }
+    preview.src = URL.createObjectURL(imageBlob);
+    preview.classList.remove("hidden");
+    dropText.classList.add("hidden");
+    clearBtn.classList.remove("hidden");
+    goBtn.disabled = false;
+  });
+
+  clearBtn.onclick = () => {
+    if (ctl) ctl.abort();
+    imageBlob = null; fileInput.value = "";
+    preview.classList.add("hidden"); preview.removeAttribute("src");
+    dropText.classList.remove("hidden");
+    clearBtn.classList.add("hidden");
+    resultCard.classList.add("hidden");
+    errEl.classList.add("hidden");
+    goBtn.disabled = true;
+  };
+
+  // ---- translate ----
+  async function translate() {
+    if (!imageBlob) return;
+    errEl.classList.add("hidden");
+    resultCard.classList.remove("hidden");
+    out.textContent = "";
+    statusEl.classList.remove("hidden");
+    statusEl.textContent = "Reading the photo…";
+    goBtn.disabled = true;
+    ctl = new AbortController();
+    resultCard.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    let text = "";
+    try {
+      const image = await blobToBase64(imageBlob);
+      const res = await fetch("/api/translate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ image, car: $("context").value.trim() }),
+        signal: ctl.signal
+      });
+
+      if (!res.ok) {
+        let msg = "Something went wrong. Please try again.";
+        try { const j = await res.json(); if (j && j.error) msg = j.error; } catch (e) {}
+        if (res.status === 504 || res.status === 502) msg = "The translation took too long. Try a smaller or clearer photo.";
+        resultCard.classList.add("hidden");
+        showError(msg);
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        text += decoder.decode(value, { stream: true });
+        statusEl.classList.add("hidden");
+        out.textContent = text;
+      }
+      text += decoder.decode();
+      out.textContent = text;
+      if (!text.trim()) {
+        resultCard.classList.add("hidden");
+        showError("Nothing came back. Try a sharper photo with better lighting.");
+        return;
+      }
+    } catch (e) {
+      if (e && e.name === "AbortError") { resultCard.classList.add("hidden"); return; }
+      if (!text) resultCard.classList.add("hidden");
+      showError("Connection problem. Please check your internet and try again.");
+      return;
+    } finally {
+      statusEl.classList.add("hidden");
+      goBtn.disabled = !imageBlob;
+    }
+
+    const first = (text.split("TRANSLATION")[1] || text).trim().split("\n")[0].slice(0, 60);
+    history.unshift({ title: new Date().toLocaleString() + " — " + first, text });
+    history = history.slice(0, 15);
+    saveHistory(); renderHistory();
+  }
+  goBtn.onclick = translate;
+
+  copyBtn.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(out.textContent);
+      copyBtn.textContent = "Copied";
+    } catch (e) {
+      const r = document.createRange(); r.selectNodeContents(out);
+      const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+      copyBtn.textContent = "Selected";
+    }
+    setTimeout(() => (copyBtn.textContent = "Copy"), 1500);
+  };
+
+  loadHistory();
+})();
+</script>
+</body>
+</html>
