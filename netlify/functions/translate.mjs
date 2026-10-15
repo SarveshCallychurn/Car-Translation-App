@@ -24,6 +24,12 @@ function limited(ip) {
   return false;
 }
 
+// Give an attempt back when Google failed, so errors don't use up the visitor's allowance.
+function refund(ip) {
+  const list = hits.get(ip);
+  if (list && list.length) list.pop();
+}
+
 const json = (obj, status) =>
   new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json" } });
 
@@ -82,49 +88,79 @@ export default async (req) => {
   if (!image || !/^[A-Za-z0-9+/=]+$/.test(image)) return json({ error: "No valid image received." }, 400);
   if (image.length > MAX_IMAGE_CHARS) return json({ error: "Image is too large." }, 413);
 
-  const generationConfig = { maxOutputTokens: 2000, temperature: 0.2 };
-  // Skip "thinking" on 2.5 Flash so answers start quickly (Netlify functions have short time limits).
-  if (/2\.5-flash/.test(MODEL) && !/lite/.test(MODEL)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+  // Try the main model first; if Google is overloaded (503), out of quota (429) or the model is
+  // unavailable (404/500), automatically try the backup models.
+  const models = [
+    MODEL,
+    ...(process.env.GEMINI_FALLBACK_MODELS || "gemini-3.7-flash,gemini-3.5-flash").split(","),
+  ]
+    .map((m) => m.trim())
+    .filter((m, i, arr) => m && arr.indexOf(m) === i);
 
-  let upstream;
-  try {
-    upstream = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(MODEL)}:streamGenerateContent?alt=sse`,
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-goog-api-key": process.env.GEMINI_API_KEY,
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [
-                { inline_data: { mime_type: "image/jpeg", data: image } },
-                { text: buildPrompt(car) },
-              ],
-            },
+  const requestBody = (model) => {
+    const generationConfig = { maxOutputTokens: 4096, temperature: 0.2 };
+    // On 2.5 Flash, skip "thinking" so answers start quickly (Netlify functions have short time limits).
+    if (/2\.5-flash/.test(model) && !/lite/.test(model)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+    return JSON.stringify({
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { inline_data: { mime_type: "image/jpeg", data: image } },
+            { text: buildPrompt(car) },
           ],
-          generationConfig,
-        }),
-      }
-    );
-  } catch {
-    return json({ error: "Could not reach the translation service." }, 502);
+        },
+      ],
+      generationConfig,
+    });
+  };
+
+  let upstream = null;
+  let lastStatus = 0;
+  let lastDetail = "";
+  for (const model of models) {
+    let res;
+    try {
+      res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-goog-api-key": process.env.GEMINI_API_KEY,
+          },
+          body: requestBody(model),
+        }
+      );
+    } catch {
+      lastStatus = 502;
+      lastDetail = "Could not reach the translation service.";
+      continue;
+    }
+    if (res.ok && res.body) {
+      upstream = res;
+      break;
+    }
+    lastStatus = res.status;
+    lastDetail = "";
+    try {
+      const raw = await res.text();
+      console.error("Gemini error", model, res.status, raw.slice(0, 500));
+      try { lastDetail = JSON.parse(raw).error.message || ""; } catch { lastDetail = raw.slice(0, 200); }
+    } catch {}
+    // Only move on to the next model for temporary or model-specific problems.
+    if (![404, 429, 500, 503].includes(res.status)) break;
   }
 
-  if (upstream.status === 429) {
-    return json({ error: "The free translation quota is used up for now. Please try again later." }, 429);
-  }
-  if (!upstream.ok || !upstream.body) {
-    let detail = "";
-    try {
-      const raw = await upstream.text();
-      console.error("Gemini error", upstream.status, raw.slice(0, 500));
-      try { detail = JSON.parse(raw).error.message || ""; } catch { detail = raw.slice(0, 200); }
-    } catch {}
-    return json({ error: `Translation service error (${upstream.status}). ${detail}`.trim().slice(0, 300) }, 502);
+  if (!upstream) {
+    refund(ip);
+    if (lastStatus === 429) {
+      return json({ error: "The free translation quota is used up for now. Please try again later." }, 429);
+    }
+    if (lastStatus === 503) {
+      return json({ error: "Google's free translation service is very busy right now. Please try again in a minute." }, 503);
+    }
+    return json({ error: `Translation service error (${lastStatus}). ${lastDetail}`.trim().slice(0, 300) }, 502);
   }
 
   // Convert Gemini's server-sent events into a plain text stream.
