@@ -52,6 +52,10 @@ function buildPrompt(car) {
 }
 
 export default async (req) => {
+  // Open /api/translate in a browser to check the setup (never reveals the key).
+  if (req.method === "GET") {
+    return json({ ok: true, model: MODEL, keyConfigured: Boolean(process.env.GEMINI_API_KEY) }, 200);
+  }
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   if (!process.env.GEMINI_API_KEY) {
@@ -114,7 +118,13 @@ export default async (req) => {
     return json({ error: "The free translation quota is used up for now. Please try again later." }, 429);
   }
   if (!upstream.ok || !upstream.body) {
-    return json({ error: "The translation service returned an error. Please try again." }, 502);
+    let detail = "";
+    try {
+      const raw = await upstream.text();
+      console.error("Gemini error", upstream.status, raw.slice(0, 500));
+      try { detail = JSON.parse(raw).error.message || ""; } catch { detail = raw.slice(0, 200); }
+    } catch {}
+    return json({ error: `Translation service error (${upstream.status}). ${detail}`.trim().slice(0, 300) }, 502);
   }
 
   // Convert Gemini's server-sent events into a plain text stream.

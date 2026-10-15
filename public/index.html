@@ -226,8 +226,9 @@
 
       if (!res.ok) {
         let msg = "Something went wrong. Please try again.";
-        try { const j = await res.json(); if (j && j.error) msg = j.error; } catch (e) {}
-        if (res.status === 504 || res.status === 502) msg = "The translation took too long. Try a smaller or clearer photo.";
+        let fromServer = false;
+        try { const j = await res.json(); if (j && j.error) { msg = j.error; fromServer = true; } } catch (e) {}
+        if (!fromServer && (res.status === 504 || res.status === 502)) msg = "The translation took too long. Try a smaller or clearer photo.";
         resultCard.classList.add("hidden");
         showError(msg);
         return;
