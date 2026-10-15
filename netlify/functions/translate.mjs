@@ -2,8 +2,8 @@
 // Japanese text in it, and streams the English translation back as plain text.
 // The API key lives only in the GEMINI_API_KEY environment variable.
 
-const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-const MAX_IMAGE_CHARS = 4_500_000; // base64 chars (~3.3 MB); Netlify's request limit is ~6 MB
+const MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+const MAX_IMAGE_CHARS = 5_500_000; // base64 chars (~4 MB photo); Netlify request cap is ~6 MB
 const RATE_LIMIT = parseInt(process.env.RATE_LIMIT || "10", 10); // requests per IP per hour
 const WINDOW_MS = 60 * 60 * 1000;
 

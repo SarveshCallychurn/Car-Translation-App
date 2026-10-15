@@ -155,7 +155,7 @@
         const c = document.createElement("canvas");
         c.width = w; c.height = h;
         c.getContext("2d").drawImage(img, 0, 0, w, h);
-        c.toBlob((b) => { URL.revokeObjectURL(url); b ? resolve(b) : reject(new Error("encode")); }, "image/jpeg", 0.85);
+        c.toBlob((b) => { URL.revokeObjectURL(url); b ? resolve(b) : reject(new Error("encode")); }, "image/jpeg", 0.9);
       };
       img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("decode")); };
       img.src = url;
@@ -178,7 +178,7 @@
     if (!f) return;
     errEl.classList.add("hidden");
     try {
-      imageBlob = await downscale(f, 1800);
+      imageBlob = await downscale(f, 2400);
     } catch (e) {
       showError("That photo couldn't be read. Please try a JPG or PNG image.");
       return;
