@@ -217,12 +217,20 @@
     let text = "";
     try {
       const image = await blobToBase64(imageBlob);
-      const res = await fetch("/api/translate", {
+      const doFetch = () => fetch("/api/translate", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ image, car: $("context").value.trim() }),
         signal: ctl.signal
       });
+      let res = await doFetch();
+      if (res.status === 503) {
+        // Google's free service was busy: wait a few seconds and try once more automatically.
+        statusEl.classList.remove("hidden");
+        statusEl.textContent = "Google's free service is busy, retrying…";
+        await new Promise((r) => setTimeout(r, 5000));
+        res = await doFetch();
+      }
 
       if (!res.ok) {
         let msg = "Something went wrong. Please try again.";
